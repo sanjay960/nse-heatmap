@@ -292,8 +292,8 @@
     </div>
     <div id="panels-wrap">
       <div class="panels">
-        <div class="panel"><div class="panel-title">▲ Top Gainers</div><div id="gainers"></div></div>
-        <div class="panel"><div class="panel-title">▼ Top Losers</div><div id="losers"></div></div>
+        <div class="panel"><div class="panel-title">▲ Top Gainers — Broad Market</div><div id="gainers"></div></div>
+        <div class="panel"><div class="panel-title">▼ Top Losers — Broad Market</div><div id="losers"></div></div>
       </div>
     </div>
   </div>
@@ -498,7 +498,7 @@ async function loadHeatmap(index) {
       t.addEventListener('mouseenter',e=>showTip(e,s)); t.addEventListener('mousemove',moveTip); t.addEventListener('mouseleave',hideTip);
       hm.appendChild(t);
     });
-    const rl=(id,arr,cls)=>{ document.getElementById(id).innerHTML=arr.map(s=>'<div class="stock-row"><div><div class="stock-sym">'+s.symbol+'</div><div class="stock-price">₹'+fmt(s.lastPrice)+'</div></div><span class="badge '+cls+'">'+fmtP(s.pChange)+'</span></div>').join('')||'<div style="color:var(--muted);font-size:11px;padding:8px 0">No data</div>'; };
+    const rl=(id,arr,cls)=>{ document.getElementById(id).innerHTML=arr.slice(0,10).map(s=>'<div class="stock-row"><div><div class="stock-sym">'+s.symbol+'</div><div class="stock-price">₹'+fmt(s.lastPrice)+'</div></div><span class="badge '+cls+'">'+fmtP(s.pChange)+'</span></div>').join('')||'<div style="color:var(--muted);font-size:11px;padding:8px 0">No data</div>'; };
     rl('gainers',glData.gainers||[],'up'); rl('losers',glData.losers||[],'down');
     document.getElementById('panels-section').style.display='';
     document.getElementById('lastUpdated').textContent='UPDATED '+new Date().toLocaleTimeString('en-IN',{hour12:false});
