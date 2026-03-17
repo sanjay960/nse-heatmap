@@ -62,36 +62,44 @@ function todayKey() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-// ── Break time tracker ────────────────────────────────────────────────────────
-// Records time only when stock TRANSITIONS from not-breaking → breaking
-// prevBreakState tracks whether stock was already breaking on last scan
-const breakTimes     = {};   // { key: { date, time } }
-const prevBreakState = {};   // { key: boolean } — was it breaking last scan?
+// ── Break time tracker (5-min candle close based) ────────────────────────────
+// A background job runs every 5 minutes aligned to candle close times
+// (9:20, 9:25, 9:30 ... 3:30 IST)
+// Break time = the 5-min candle close at which stock FIRST closed above R1 / below S1
+const breakTimes     = {};  // { 'SYMBOL_r1': { date, time } }
+const prevBreakState = {};  // { 'SYMBOL_r1': bool } tracks last candle state
 
-function recordBreak(symbol, type, isBreaking) {
-  const key   = symbol + '_' + type;
-  const today = todayKey();
+// Get current 5-min candle close time string (e.g. "09:50" if time is 9:47)
+function candleCloseTime() {
+  const now = new Date();
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const mins = ist.getMinutes();
+  // Round up to next 5-min boundary
+  const closeMins = Math.ceil((mins + 1) / 5) * 5;
+  const closeDate = new Date(ist);
+  closeDate.setMinutes(closeMins, 0, 0);
+  return closeDate.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:false });
+}
+
+// Called by background job only — not by API requests
+function recordBreakCandle(symbol, type, isBreaking) {
+  const key         = symbol + '_' + type;
+  const today       = todayKey();
   const wasBreaking = prevBreakState[key] ?? false;
 
-  // Reset if new day
+  // Reset on new day
   if (breakTimes[key] && breakTimes[key].date !== today) {
     delete breakTimes[key];
     prevBreakState[key] = false;
   }
 
-  // Only stamp the time on the TRANSITION: false → true
-  if (isBreaking && !wasBreaking) {
-    breakTimes[key] = {
-      date: today,
-      time: new Date().toLocaleTimeString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: false,
-      }),
-    };
+  // Record ONLY on transition: was NOT breaking → now IS breaking
+  // Time = current 5-min candle close time
+  if (isBreaking && !wasBreaking && !breakTimes[key]) {
+    breakTimes[key] = { date: today, time: candleCloseTime() };
+    console.log(`[BREAK] ${symbol} crossed ${type.toUpperCase()} at candle close ${breakTimes[key].time}`);
   }
 
-  // Always update previous state
   prevBreakState[key] = isBreaking;
 }
 
@@ -100,6 +108,70 @@ function getBreakTime(symbol, type) {
   if (!entry || entry.date !== todayKey()) return null;
   return entry.time;
 }
+
+// ── Background 5-min candle scanner ──────────────────────────────────────────
+// Runs at every 5-min candle close during market hours (9:15–3:30 IST)
+async function runCandleScanner() {
+  const now = new Date();
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const h   = ist.getHours(), m = ist.getMinutes();
+
+  // Only run during market hours: 9:15 AM to 3:30 PM IST
+  const afterOpen  = h > 9  || (h === 9  && m >= 15);
+  const beforeClose= h < 15 || (h === 15 && m <= 30);
+  if (!afterOpen || !beforeClose) return;
+
+  console.log('[SCANNER] Running 5-min candle pivot scan at', candleCloseTime());
+  try {
+    const fnoSyms = await getFNOSymbols();
+    // Scan all sectors
+    const results = await Promise.allSettled(
+      SECTORS.map(sector =>
+        nseGet(`https://www.nseindia.com/api/equity-stockIndices?index=${encodeURIComponent(sector)}`)
+          .then(data => {
+            const meta = data.metadata?.indexName || sector;
+            return (data.data || []).filter(s => s.symbol !== meta && fnoSyms.has(s.symbol) && s.lastPrice && s.dayHigh && s.dayLow);
+          })
+      )
+    );
+    const seen = new Set();
+    results.forEach(r => {
+      if (r.status !== 'fulfilled') return;
+      r.value.forEach(s => {
+        if (seen.has(s.symbol)) return;
+        seen.add(s.symbol);
+        const ltp    = s.lastPrice;
+        const todayP = computePivots(s.dayHigh, s.dayLow, s.previousClose);
+        const prevH  = Math.max(s.open || s.previousClose, s.previousClose);
+        const prevL  = Math.min(s.open || s.previousClose, s.previousClose);
+        const prevP  = computePivots(prevH, prevL, s.previousClose);
+        const r1Rising  = todayP.r1 > prevP.r1;
+        const s1Falling = todayP.s1 < prevP.s1;
+        // Record candle-close breaks
+        recordBreakCandle(s.symbol, 'r1', ltp > todayP.r1 && r1Rising);
+        recordBreakCandle(s.symbol, 's1', ltp < todayP.s1 && s1Falling);
+      });
+    });
+    console.log('[SCANNER] Done. Tracked', seen.size, 'stocks.');
+  } catch(e) { console.error('[SCANNER] Error:', e.message); }
+}
+
+// Align scanner to next 5-min boundary, then run every 5 mins
+function startCandleScanner() {
+  const now  = new Date();
+  const ist  = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const secs = ist.getSeconds();
+  const ms   = ist.getMilliseconds();
+  const minsRem = 5 - (ist.getMinutes() % 5);
+  const msUntilNext = (minsRem * 60 - secs) * 1000 - ms;
+  console.log(`[SCANNER] Starting in ${Math.round(msUntilNext/1000)}s (next 5-min boundary)`);
+  setTimeout(() => {
+    runCandleScanner(); // run immediately at boundary
+    setInterval(runCandleScanner, 5 * 60 * 1000); // then every 5 mins
+  }, msUntilNext);
+}
+
+startCandleScanner();
 
 // ── Money flow rolling history ────────────────────────────────────────────────
 const MF_FILE = path.join(__dirname, 'mf_history.json');
