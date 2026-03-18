@@ -234,6 +234,48 @@ function calcPivotSignals(s) {
   };
 }
 
+
+// ── Intraday candle data from NSE chart API ───────────────────────────────────
+// Fetches today's 5-min candles and finds FIRST candle that closed above R1 / below S1
+async function getExactBreakTime(symbol, level, direction) {
+  // direction = 'above' for R1, 'below' for S1
+  try {
+    const now     = new Date();
+    const ist     = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const toTime  = Math.floor(ist.getTime() / 1000);
+    // From 9:15 AM today IST
+    const fromIST = new Date(ist);
+    fromIST.setHours(9, 15, 0, 0);
+    const fromTime = Math.floor(fromIST.getTime() / 1000);
+
+    const url  = `https://charting.nseindia.com/Charts/symbolhistoricaldata/${encodeURIComponent(symbol)}` +
+                 `?Fromdate=${fromTime}&Todate=${toTime}&interval=5&exchange=NSE&type=EQ`;
+    const data = await nseGet(url);
+    const candles = data?.grapthData || data?.graphData || data?.data || [];
+
+    if (!candles.length) return null;
+
+    // Each candle: [timestamp, open, high, low, close, volume]
+    for (const candle of candles) {
+      const [ts, , , , close] = candle;
+      const closeAbove = direction === 'above' ? close > level : close < level;
+      if (closeAbove) {
+        // ts is in milliseconds
+        const d = new Date(ts);
+        const breakIST = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        // Add 5 mins to get candle CLOSE time
+        breakIST.setMinutes(breakIST.getMinutes() + 5);
+        return breakIST.toLocaleTimeString('en-IN', {
+          hour: '2-digit', minute: '2-digit', hour12: false
+        });
+      }
+    }
+    return null;
+  } catch(e) {
+    return null;
+  }
+}
+
 // ── Standard routes ───────────────────────────────────────────────────────────
 app.get('/api/indices', async (req, res) => {
   try { res.json(await nseGet('https://www.nseindia.com/api/allIndices')); }
