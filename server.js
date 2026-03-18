@@ -623,3 +623,72 @@ app.get('/api/pcr-batch', async (req, res) => {
   results.forEach(r => { if (r.status === 'fulfilled') pcr[r.value.sym] = r.value.pcr; });
   res.json({ pcr });
 });
+
+// ── BATCH OI CHANGE for signal stocks ────────────────────────────────────────
+// For R1 breakout stocks → fetch CE OI change at ATM
+// For S1 breakdown stocks → fetch PE OI change at ATM
+app.get('/api/oi-batch', async (req, res) => {
+  const symbols = (req.query.symbols || '').split(',').filter(Boolean).slice(0, 30);
+  if (!symbols.length) return res.json({ oi: {} });
+
+  const results = await Promise.allSettled(
+    symbols.map(async sym => {
+      const isIndex = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'].includes(sym);
+      const url = isIndex
+        ? `https://www.nseindia.com/api/option-chain-indices?symbol=${encodeURIComponent(sym)}`
+        : `https://www.nseindia.com/api/option-chain-equities?symbol=${encodeURIComponent(sym)}`;
+
+      const data    = await nseGet(url);
+      const records = data.records  || {};
+      const filtered= data.filtered || {};
+      const spot    = filtered.underlyingValue || records.underlyingValue || 0;
+      const expiry  = (records.expiryDates || [])[0];
+      const rows    = (records.data || []).filter(r => r.expiryDate === expiry);
+
+      // Find ATM strike
+      const strikes = [...new Set(rows.map(r => r.strikePrice))].sort((a,b) => a-b);
+      const atm     = strikes.reduce((prev, curr) =>
+        Math.abs(curr - spot) < Math.abs(prev - spot) ? curr : prev, strikes[0] || 0
+      );
+
+      // ATM row
+      const atmRow  = rows.find(r => r.strikePrice === atm) || {};
+      const ce      = atmRow.CE || {};
+      const pe      = atmRow.PE || {};
+
+      // Total OI across all strikes
+      const totalCEoi    = rows.reduce((s,r) => s + (r.CE?.openInterest || 0), 0);
+      const totalPEoi    = rows.reduce((s,r) => s + (r.PE?.openInterest || 0), 0);
+      const totalCEoiChg = rows.reduce((s,r) => s + (r.CE?.changeinOpenInterest || 0), 0);
+      const totalPEoiChg = rows.reduce((s,r) => s + (r.PE?.changeinOpenInterest || 0), 0);
+      const pcr          = totalCEoi > 0 ? +(totalPEoi / totalCEoi).toFixed(2) : 0;
+
+      return {
+        sym, spot, atm, expiry,
+        ce: {
+          oi       : ce.openInterest         || 0,
+          oiChange : ce.changeinOpenInterest  || 0,
+          oiChgPct : ce.pchangeinOpenInterest || 0,
+          ltp      : ce.lastPrice             || 0,
+          iv       : ce.impliedVolatility     || 0,
+        },
+        pe: {
+          oi       : pe.openInterest         || 0,
+          oiChange : pe.changeinOpenInterest  || 0,
+          oiChgPct : pe.pchangeinOpenInterest || 0,
+          ltp      : pe.lastPrice             || 0,
+          iv       : pe.impliedVolatility     || 0,
+        },
+        total: {
+          ceOi: totalCEoi, peOi: totalPEoi,
+          ceOiChg: totalCEoiChg, peOiChg: totalPEoiChg,
+        },
+        pcr,
+      };
+    })
+  );
+
+  const oi = {};
+  results.forEach(r => { if (r.status === 'fulfilled') oi[r.value.sym] = r.value; });
+  res.json({ oi });
+});

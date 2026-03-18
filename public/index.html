@@ -314,6 +314,33 @@
   .sig-list-row-5.buy-row{border-left:3px solid var(--g3)}
   .sig-list-row-5.sell-row{border-left:3px solid var(--r3)}
 
+
+  /* OI change in scanner */
+  .sig-list-hdr-6{display:grid;grid-template-columns:1fr 76px 60px 68px 56px 80px;gap:4px;padding:7px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:1}
+  .sig-list-row-6{display:grid;grid-template-columns:1fr 76px 60px 68px 56px 80px;gap:4px;padding:7px 14px;border-bottom:1px solid rgba(30,37,48,.5);transition:background .1s;animation:fadeIn .2s ease both;cursor:pointer}
+  .sig-list-row-6:last-child{border-bottom:none}
+  .sig-list-row-6:hover{background:rgba(255,255,255,.04)}
+  .sig-list-row-6.buy-row{border-left:3px solid var(--g3)}
+  .sig-list-row-6.sell-row{border-left:3px solid var(--r3)}
+
+  /* OI change value */
+  .oi-pos{color:var(--g3);font-family:var(--mono);font-size:11px;font-weight:700}
+  .oi-neg{color:var(--r3);font-family:var(--mono);font-size:11px;font-weight:700}
+  .oi-neu{color:var(--muted);font-family:var(--mono);font-size:11px}
+
+  /* OI detail panel (expands below each row) */
+  .oi-detail{background:rgba(255,255,255,.02);border-top:1px solid var(--border);padding:10px 14px;display:none;animation:fadeIn .2s ease}
+  .oi-detail.open{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .oi-detail-col{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:10px 12px}
+  .oi-detail-title{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;font-weight:700}
+  .oi-detail-title.ce{color:var(--g3)}
+  .oi-detail-title.pe{color:var(--r3)}
+  .oi-kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;margin-bottom:4px}
+  .oi-kv-lbl{color:var(--muted)}
+  .oi-kv-val{color:var(--text)}
+  .oi-bar-mini{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;margin-top:6px}
+  .oi-bar-mini-fill{height:100%;border-radius:2px;transition:width .5s}
+
 </style>
 </head>
 <body>
@@ -798,9 +825,10 @@ function toggleMFCard(cid,idx){
 // ── Pivot Scanner ─────────────────────────────────────────────────────────────
 let activeScanSector = 'ALL';
 let r1Stocks = [], s1Stocks = [];
-let r1SortKey = 'pct', r1SortDir = -1;  // default: % change desc for buy
-let s1SortKey = 'pct', s1SortDir =  1;  // default: % change asc for sell
+let r1SortKey = 'pct', r1SortDir = -1;
+let s1SortKey = 'pct', s1SortDir =  1;
 let pcrMap = {};
+let oiMap  = {};
 
 function setScanFilter(btn) {
   document.querySelectorAll('.scan-filter-btn').forEach(b=>b.classList.remove('active'));
@@ -847,24 +875,24 @@ async function runPivotScan() {
 }
 
 async function fetchPCR(symbols) {
-  // Show loading spinners in PCR cells
-  document.querySelectorAll('.pcr-cell').forEach(el => {
-    el.innerHTML = '<span class="pcr-loading"></span>';
-  });
+  document.querySelectorAll('.pcr-cell').forEach(el => { el.innerHTML = '<span class="pcr-loading"></span>'; });
+  document.querySelectorAll('.oi-cell').forEach(el  => { el.innerHTML = '<span class="pcr-loading"></span>'; });
   try {
-    // Batch in groups of 10 to avoid overloading NSE
     const batches = [];
-    for (let i = 0; i < symbols.length; i += 10) {
-      batches.push(symbols.slice(i, i + 10));
-    }
+    for (let i = 0; i < symbols.length; i += 10) batches.push(symbols.slice(i, i + 10));
+
     for (const batch of batches) {
-      const data = await fetch('/api/pcr-batch?symbols=' + batch.join(',')).then(r=>r.json());
-      Object.assign(pcrMap, data.pcr || {});
+      // Fetch PCR and OI in parallel per batch
+      const [pcrData, oiData] = await Promise.all([
+        fetch('/api/pcr-batch?symbols=' + batch.join(',')).then(r=>r.json()),
+        fetch('/api/oi-batch?symbols='  + batch.join(',')).then(r=>r.json()),
+      ]);
+      Object.assign(pcrMap, pcrData.pcr || {});
+      Object.assign(oiMap,  oiData.oi   || {});
     }
-    // Re-render with PCR data
     renderScannerLists();
   } catch(e) {
-    document.querySelectorAll('.pcr-cell').forEach(el => { el.textContent = '—'; });
+    document.querySelectorAll('.pcr-cell,.oi-cell').forEach(el => { el.textContent = '—'; });
   }
 }
 
@@ -874,6 +902,15 @@ function sortStocks(stocks, key, dir) {
       const pa = pcrMap[a.symbol] ?? -1;
       const pb = pcrMap[b.symbol] ?? -1;
       return dir * (pb - pa);
+    }
+    if (key === 'oi') {
+      // For R1 stocks sort by CE OI change, for S1 by PE OI change
+      const getOI = s => {
+        const d = oiMap[s.symbol];
+        if (!d) return 0;
+        return s.brokeBothR1 ? (d.ce?.oiChange || 0) : (d.pe?.oiChange || 0);
+      };
+      return dir * (getOI(b) - getOI(a));
     }
     if (key === 'pct') return dir * (b.pChange - a.pChange);
     if (key === 'ltp') return dir * (b.lastPrice - a.lastPrice);
@@ -926,42 +963,107 @@ function pcrLabel(pcr) {
 function buildSigList(stocks, mode, side) {
   if (!stocks.length) return '<div class="scan-col-empty">No signals found.</div>';
   const isBuy = mode === 'buy';
-  const sKey  = side === 'r1' ? r1SortKey : s1SortKey;
-  const sDir  = side === 'r1' ? r1SortDir : s1SortDir;
 
   const sortBar = `
     <div class="sort-bar">
       <span class="sort-lbl">SORT BY:</span>
       <button class="sort-btn" ${side}-sort="pct" onclick="setSort('${side}','pct')">CHG% <span class="sort-arrow"></span></button>
       <button class="sort-btn" ${side}-sort="pcr" onclick="setSort('${side}','pcr')">PCR <span class="sort-arrow"></span></button>
+      <button class="sort-btn" ${side}-sort="oi"  onclick="setSort('${side}','oi')">OI CHG <span class="sort-arrow"></span></button>
       <button class="sort-btn" ${side}-sort="ltp" onclick="setSort('${side}','ltp')">LTP <span class="sort-arrow"></span></button>
-      <span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted)">${stocks.length} stocks</span>
+      <span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted)">${stocks.length} stocks · click row for OI detail</span>
     </div>`;
 
-  const rows = stocks.map((s,i) => {
-    const breakT = isBuy ? (s.breakTime?.r1||'—') : (s.breakTime?.s1||'—');
-    const pcr    = pcrMap[s.symbol];
+  const rows = stocks.map((s, i) => {
+    const breakT  = isBuy ? (s.breakTime?.r1 || '—') : (s.breakTime?.s1 || '—');
+    const pcr     = pcrMap[s.symbol];
+    const oid     = oiMap[s.symbol];
     const pcrHtml = pcr !== undefined ? pcrLabel(pcr) : '<span class="pcr-loading"></span>';
-    return `<div class="sig-list-row-5 ${isBuy?'buy-row':'sell-row'}" style="animation-delay:${i*15}ms">
-      <span class="sig-sym">${s.symbol}</span>
-      <span class="sig-ltp">₹${fmt(s.lastPrice)}</span>
-      <span class="sig-pct ${s.pChange>=0?'up':'down'}">${fmtP(s.pChange)}</span>
-      <span class="sig-time">${breakT}</span>
-      <span class="pcr-cell" style="text-align:right;font-family:var(--mono);font-size:11px">${pcrHtml}</span>
-    </div>`;
+
+    // OI change — CE for R1 breakout, PE for S1 breakdown
+    let oiHtml = '<span class="pcr-loading"></span>';
+    if (oid) {
+      const oiChg = isBuy ? oid.ce.oiChange : oid.pe.oiChange;
+      const cls   = oiChg > 0 ? 'oi-pos' : oiChg < 0 ? 'oi-neg' : 'oi-neu';
+      oiHtml = `<span class="${cls}">${oiChg >= 0 ? '+' : ''}${fmtV(oiChg)}</span>`;
+    }
+
+    const rowId    = side + '-row-' + i;
+    const detailId = side + '-detail-' + i;
+
+    // OI detail panel
+    let detailHtml = '<div class="oi-detail" id="' + detailId + '">';
+    if (oid) {
+      const maxOI  = Math.max(oid.ce.oi, oid.pe.oi, 1);
+      const ceBw   = (oid.ce.oi / maxOI * 100).toFixed(0);
+      const peBw   = (oid.pe.oi / maxOI * 100).toFixed(0);
+      const ceChgCls = oid.ce.oiChange > 0 ? 'oi-pos' : oid.ce.oiChange < 0 ? 'oi-neg' : 'oi-neu';
+      const peChgCls = oid.pe.oiChange > 0 ? 'oi-pos' : oid.pe.oiChange < 0 ? 'oi-neg' : 'oi-neu';
+      detailHtml += `
+        <div class="oi-detail-col">
+          <div class="oi-detail-title ce">CALL (CE) — ATM ${fmt(oid.atm)}</div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI</span><span class="oi-kv-val">${fmtV(oid.ce.oi)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI CHANGE</span><span class="${ceChgCls}">${oid.ce.oiChange>=0?'+':''}${fmtV(oid.ce.oiChange)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI CHG %</span><span class="${ceChgCls}">${oid.ce.oiChgPct>=0?'+':''}${(+oid.ce.oiChgPct||0).toFixed(2)}%</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">LTP</span><span class="oi-kv-val">₹${fmt(oid.ce.ltp)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">IV</span><span class="oi-kv-val">${(+oid.ce.iv||0).toFixed(1)}%</span></div>
+          <div class="oi-bar-mini"><div class="oi-bar-mini-fill" style="width:${ceBw}%;background:var(--g3)"></div></div>
+        </div>
+        <div class="oi-detail-col">
+          <div class="oi-detail-title pe">PUT (PE) — ATM ${fmt(oid.atm)}</div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI</span><span class="oi-kv-val">${fmtV(oid.pe.oi)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI CHANGE</span><span class="${peChgCls}">${oid.pe.oiChange>=0?'+':''}${fmtV(oid.pe.oiChange)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">OI CHG %</span><span class="${peChgCls}">${oid.pe.oiChgPct>=0?'+':''}${(+oid.pe.oiChgPct||0).toFixed(2)}%</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">LTP</span><span class="oi-kv-val">₹${fmt(oid.pe.ltp)}</span></div>
+          <div class="oi-kv"><span class="oi-kv-lbl">IV</span><span class="oi-kv-val">${(+oid.pe.iv||0).toFixed(1)}%</span></div>
+          <div class="oi-bar-mini"><div class="oi-bar-mini-fill" style="width:${peBw}%;background:var(--r3)"></div></div>
+        </div>
+        <div style="grid-column:1/-1;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:10px 12px">
+          <div class="oi-detail-title" style="color:var(--acc)">TOTAL OI ACROSS ALL STRIKES</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:4px">
+            <div class="oi-kv" style="flex-direction:column;text-align:center"><span class="oi-kv-val" style="color:var(--g3)">${fmtV(oid.total.ceOi)}</span><span class="oi-kv-lbl">TOTAL CE OI</span></div>
+            <div class="oi-kv" style="flex-direction:column;text-align:center"><span class="oi-kv-val ${oid.total.ceOiChg>=0?'oi-pos':'oi-neg'}">${oid.total.ceOiChg>=0?'+':''}${fmtV(oid.total.ceOiChg)}</span><span class="oi-kv-lbl">CE OI CHG</span></div>
+            <div class="oi-kv" style="flex-direction:column;text-align:center"><span class="oi-kv-val" style="color:var(--r3)">${fmtV(oid.total.peOi)}</span><span class="oi-kv-lbl">TOTAL PE OI</span></div>
+            <div class="oi-kv" style="flex-direction:column;text-align:center"><span class="oi-kv-val ${oid.total.peOiChg>=0?'oi-pos':'oi-neg'}">${oid.total.peOiChg>=0?'+':''}${fmtV(oid.total.peOiChg)}</span><span class="oi-kv-lbl">PE OI CHG</span></div>
+          </div>
+        </div>`;
+    } else {
+      detailHtml += '<div style="grid-column:1/-1;padding:16px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted)">OI data loading…</div>';
+    }
+    detailHtml += '</div>';
+
+    return `
+      <div id="${rowId}" class="sig-list-row-6 ${isBuy?'buy-row':'sell-row'}" style="animation-delay:${i*15}ms" onclick="toggleOIDetail('${detailId}')">
+        <span class="sig-sym">${s.symbol}</span>
+        <span class="sig-ltp">₹${fmt(s.lastPrice)}</span>
+        <span class="sig-pct ${s.pChange>=0?'up':'down'}">${fmtP(s.pChange)}</span>
+        <span class="sig-time">${breakT}</span>
+        <span class="pcr-cell" style="text-align:right;font-family:var(--mono);font-size:11px">${pcrHtml}</span>
+        <span class="oi-cell" style="text-align:right">${oiHtml}</span>
+      </div>
+      ${detailHtml}`;
   }).join('');
 
   return `<div class="sig-list">
     ${sortBar}
-    <div class="sig-list-hdr-5">
+    <div class="sig-list-hdr-6">
       <span>SYMBOL</span>
       <span style="text-align:right">LTP</span>
       <span style="text-align:right">CHG%</span>
       <span style="text-align:right">BROKE AT</span>
       <span style="text-align:right">PCR</span>
+      <span style="text-align:right">${isBuy?'CE':'PE'} OI CHG</span>
     </div>
     ${rows}
   </div>`;
+}
+
+function toggleOIDetail(id) {
+  const el     = document.getElementById(id);
+  const isOpen = el.classList.contains('open');
+  // Close all
+  document.querySelectorAll('.oi-detail.open').forEach(d => d.classList.remove('open'));
+  if (!isOpen) el.classList.add('open');
 }
 
 
