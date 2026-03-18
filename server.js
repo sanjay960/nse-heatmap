@@ -569,3 +569,30 @@ app.get('/api/fno-list', async (req, res) => {
     res.json({ symbols: [...syms].sort() });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── BATCH PCR for multiple symbols ───────────────────────────────────────────
+app.get('/api/pcr-batch', async (req, res) => {
+  const symbols = (req.query.symbols || '').split(',').filter(Boolean).slice(0, 30);
+  if (!symbols.length) return res.json({ pcr: {} });
+
+  const results = await Promise.allSettled(
+    symbols.map(async sym => {
+      const isIndex = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'].includes(sym);
+      const url = isIndex
+        ? `https://www.nseindia.com/api/option-chain-indices?symbol=${encodeURIComponent(sym)}`
+        : `https://www.nseindia.com/api/option-chain-equities?symbol=${encodeURIComponent(sym)}`;
+      const data    = await nseGet(url);
+      const records = data.records || {};
+      const expiry  = (records.expiryDates || [])[0];
+      const rows    = (records.data || []).filter(r => r.expiryDate === expiry);
+      const totalCE = rows.reduce((s, r) => s + (r.CE?.openInterest || 0), 0);
+      const totalPE = rows.reduce((s, r) => s + (r.PE?.openInterest || 0), 0);
+      const pcr     = totalCE > 0 ? +(totalPE / totalCE).toFixed(2) : 0;
+      return { sym, pcr };
+    })
+  );
+
+  const pcr = {};
+  results.forEach(r => { if (r.status === 'fulfilled') pcr[r.value.sym] = r.value.pcr; });
+  res.json({ pcr });
+});

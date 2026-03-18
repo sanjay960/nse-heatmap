@@ -274,6 +274,26 @@
   .pcr-bar-fill{height:100%;border-radius:5px;transition:width .6s cubic-bezier(.4,0,.2,1)}
   .pcr-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted)}
 
+
+  /* ── Scanner sort & PCR ── */
+  .sort-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02);flex-wrap:wrap}
+  .sort-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px;margin-right:4px}
+  .sort-btn{font-family:var(--mono);font-size:10px;padding:4px 10px;border:1px solid var(--border);background:none;color:var(--muted);border-radius:4px;cursor:pointer;transition:all .15s;letter-spacing:.5px}
+  .sort-btn:hover{border-color:var(--text);color:var(--text)}
+  .sort-btn.active{border-color:var(--acc);color:var(--acc);background:rgba(240,165,0,.08)}
+  .sort-btn .sort-arrow{margin-left:4px;font-size:9px}
+  .pcr-loading{display:inline-block;width:10px;height:10px;border:1px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+  .pcr-bull{color:var(--g3);font-weight:700}
+  .pcr-bear{color:var(--r3);font-weight:700}
+  .pcr-neu{color:var(--muted)}
+  /* Updated sig-list-hdr & row for extra PCR column */
+  .sig-list-hdr-5{display:grid;grid-template-columns:1fr 80px 64px 74px 60px;gap:4px;padding:7px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:1}
+  .sig-list-row-5{display:grid;grid-template-columns:1fr 80px 64px 74px 60px;gap:4px;padding:8px 14px;border-bottom:1px solid rgba(30,37,48,.5);transition:background .1s;animation:fadeIn .2s ease both}
+  .sig-list-row-5:last-child{border-bottom:none}
+  .sig-list-row-5:hover{background:rgba(255,255,255,.03)}
+  .sig-list-row-5.buy-row{border-left:3px solid var(--g3)}
+  .sig-list-row-5.sell-row{border-left:3px solid var(--r3)}
+
 </style>
 </head>
 <body>
@@ -756,39 +776,171 @@ function toggleMFCard(cid,idx){
 }
 
 // ── Pivot Scanner ─────────────────────────────────────────────────────────────
-let activeScanSector='ALL';
-function setScanFilter(btn){ document.querySelectorAll('.scan-filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); activeScanSector=btn.dataset.sector; runPivotScan(); }
+let activeScanSector = 'ALL';
+let r1Stocks = [], s1Stocks = [];
+let r1SortKey = 'pct', r1SortDir = -1;  // default: % change desc for buy
+let s1SortKey = 'pct', s1SortDir =  1;  // default: % change asc for sell
+let pcrMap = {};
 
-async function runPivotScan(){
-  const r1El=document.getElementById('r1-results'), s1El=document.getElementById('s1-results');
-  const loading='<div class="load-msg"><div class="spinner"></div> Scanning…</div>';
-  r1El.innerHTML=loading; s1El.innerHTML=loading;
-  document.getElementById('r1-count').textContent='—'; document.getElementById('s1-count').textContent='—';
-  try {
-    const url=activeScanSector==='ALL'?'/api/pivot-all':'/api/pivot-stocks?index='+encodeURIComponent(activeScanSector);
-    const data=await fetch(url).then(r=>r.json());
-    if(data.error) throw new Error(data.error);
-    const stocks=data.stocks||[];
-    const r1Stocks=stocks.filter(s=>s.brokeBothR1).sort((a,b)=>b.pChange-a.pChange);
-    const s1Stocks=stocks.filter(s=>s.brokeBothS1).sort((a,b)=>a.pChange-b.pChange);
-    document.getElementById('r1-count').textContent=r1Stocks.length;
-    document.getElementById('s1-count').textContent=s1Stocks.length;
-    r1El.innerHTML=renderSigList(r1Stocks,'buy');
-    s1El.innerHTML=renderSigList(s1Stocks,'sell');
-  } catch(err){ const e='<div class="scan-col-empty">⚠ '+err.message+'</div>'; r1El.innerHTML=e; s1El.innerHTML=e; }
+function setScanFilter(btn) {
+  document.querySelectorAll('.scan-filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  activeScanSector = btn.dataset.sector;
+  runPivotScan();
 }
 
-function renderSigList(stocks,mode){
-  if(!stocks.length) return '<div class="scan-col-empty">No signals found.</div>';
-  const isBuy=mode==='buy';
-  return `<div class="sig-list">
-    <div class="sig-list-hdr"><span>SYMBOL</span><span style="text-align:right">LTP</span><span style="text-align:right">CHG%</span><span style="text-align:right">BROKE AT</span></div>
-    ${stocks.map((s,i)=>`<div class="sig-list-row ${isBuy?'buy-row':'sell-row'}" style="animation-delay:${i*20}ms">
+async function runPivotScan() {
+  const r1El = document.getElementById('r1-results');
+  const s1El = document.getElementById('s1-results');
+  const loading = '<div class="load-msg"><div class="spinner"></div> Scanning…</div>';
+  r1El.innerHTML = loading; s1El.innerHTML = loading;
+  document.getElementById('r1-count').textContent = '—';
+  document.getElementById('s1-count').textContent = '—';
+  pcrMap = {};
+
+  try {
+    const url = activeScanSector === 'ALL'
+      ? '/api/pivot-all'
+      : '/api/pivot-stocks?index=' + encodeURIComponent(activeScanSector);
+    const data = await fetch(url).then(r=>r.json());
+    if (data.error) throw new Error(data.error);
+    const stocks = data.stocks || [];
+
+    r1Stocks = stocks.filter(s => s.brokeBothR1);
+    s1Stocks = stocks.filter(s => s.brokeBothS1);
+
+    document.getElementById('r1-count').textContent = r1Stocks.length;
+    document.getElementById('s1-count').textContent = s1Stocks.length;
+
+    // Render with default sort first (no PCR yet)
+    renderScannerLists();
+
+    // Fetch PCR for all signal stocks in background
+    const allSyms = [...new Set([...r1Stocks, ...s1Stocks].map(s => s.symbol))];
+    if (allSyms.length) {
+      fetchPCR(allSyms);
+    }
+  } catch(err) {
+    const e = '<div class="scan-col-empty">⚠ ' + err.message + '</div>';
+    r1El.innerHTML = e; s1El.innerHTML = e;
+  }
+}
+
+async function fetchPCR(symbols) {
+  // Show loading spinners in PCR cells
+  document.querySelectorAll('.pcr-cell').forEach(el => {
+    el.innerHTML = '<span class="pcr-loading"></span>';
+  });
+  try {
+    // Batch in groups of 10 to avoid overloading NSE
+    const batches = [];
+    for (let i = 0; i < symbols.length; i += 10) {
+      batches.push(symbols.slice(i, i + 10));
+    }
+    for (const batch of batches) {
+      const data = await fetch('/api/pcr-batch?symbols=' + batch.join(',')).then(r=>r.json());
+      Object.assign(pcrMap, data.pcr || {});
+    }
+    // Re-render with PCR data
+    renderScannerLists();
+  } catch(e) {
+    document.querySelectorAll('.pcr-cell').forEach(el => { el.textContent = '—'; });
+  }
+}
+
+function sortStocks(stocks, key, dir) {
+  return [...stocks].sort((a, b) => {
+    if (key === 'pcr') {
+      const pa = pcrMap[a.symbol] ?? -1;
+      const pb = pcrMap[b.symbol] ?? -1;
+      return dir * (pb - pa);
+    }
+    if (key === 'pct') return dir * (b.pChange - a.pChange);
+    if (key === 'ltp') return dir * (b.lastPrice - a.lastPrice);
+    return 0;
+  });
+}
+
+function setSort(side, key) {
+  if (side === 'r1') {
+    if (r1SortKey === key) r1SortDir *= -1; else { r1SortKey = key; r1SortDir = -1; }
+  } else {
+    if (s1SortKey === key) s1SortDir *= -1; else { s1SortKey = key; s1SortDir = -1; }
+  }
+  renderScannerLists();
+  // Update button states
+  updateSortBtns('r1');
+  updateSortBtns('s1');
+}
+
+function updateSortBtns(side) {
+  const key = side === 'r1' ? r1SortKey : s1SortKey;
+  const dir = side === 'r1' ? r1SortDir : s1SortDir;
+  document.querySelectorAll(`.sort-btn[${side}-sort]`).forEach(btn => {
+    btn.classList.remove('active');
+    btn.querySelector('.sort-arrow').textContent = '';
+  });
+  const active = document.querySelector(`.sort-btn[${side}-sort="${key}"]`);
+  if (active) {
+    active.classList.add('active');
+    active.querySelector('.sort-arrow').textContent = dir === -1 ? '↓' : '↑';
+  }
+}
+
+function renderScannerLists() {
+  const r1Sorted = sortStocks(r1Stocks, r1SortKey, r1SortDir);
+  const s1Sorted = sortStocks(s1Stocks, s1SortKey, s1SortDir);
+  document.getElementById('r1-results').innerHTML = buildSigList(r1Sorted, 'buy', 'r1');
+  document.getElementById('s1-results').innerHTML = buildSigList(s1Sorted, 'sell', 's1');
+  // Update sort button active states
+  updateSortBtns('r1');
+  updateSortBtns('s1');
+}
+
+function pcrLabel(pcr) {
+  if (pcr === undefined || pcr === null || pcr < 0) return '<span class="pcr-neu">—</span>';
+  const cls = pcr > 1.3 ? 'pcr-bull' : pcr < 0.7 ? 'pcr-bear' : 'pcr-neu';
+  return `<span class="${cls}">${pcr.toFixed(2)}</span>`;
+}
+
+function buildSigList(stocks, mode, side) {
+  if (!stocks.length) return '<div class="scan-col-empty">No signals found.</div>';
+  const isBuy = mode === 'buy';
+  const sKey  = side === 'r1' ? r1SortKey : s1SortKey;
+  const sDir  = side === 'r1' ? r1SortDir : s1SortDir;
+
+  const sortBar = `
+    <div class="sort-bar">
+      <span class="sort-lbl">SORT BY:</span>
+      <button class="sort-btn" ${side}-sort="pct" onclick="setSort('${side}','pct')">CHG% <span class="sort-arrow"></span></button>
+      <button class="sort-btn" ${side}-sort="pcr" onclick="setSort('${side}','pcr')">PCR <span class="sort-arrow"></span></button>
+      <button class="sort-btn" ${side}-sort="ltp" onclick="setSort('${side}','ltp')">LTP <span class="sort-arrow"></span></button>
+      <span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted)">${stocks.length} stocks</span>
+    </div>`;
+
+  const rows = stocks.map((s,i) => {
+    const breakT = isBuy ? (s.breakTime?.r1||'—') : (s.breakTime?.s1||'—');
+    const pcr    = pcrMap[s.symbol];
+    const pcrHtml = pcr !== undefined ? pcrLabel(pcr) : '<span class="pcr-loading"></span>';
+    return `<div class="sig-list-row-5 ${isBuy?'buy-row':'sell-row'}" style="animation-delay:${i*15}ms">
       <span class="sig-sym">${s.symbol}</span>
       <span class="sig-ltp">₹${fmt(s.lastPrice)}</span>
       <span class="sig-pct ${s.pChange>=0?'up':'down'}">${fmtP(s.pChange)}</span>
-      <span class="sig-time">${isBuy?(s.breakTime?.r1||'—'):(s.breakTime?.s1||'—')}</span>
-    </div>`).join('')}
+      <span class="sig-time">${breakT}</span>
+      <span class="pcr-cell" style="text-align:right;font-family:var(--mono);font-size:11px">${pcrHtml}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="sig-list">
+    ${sortBar}
+    <div class="sig-list-hdr-5">
+      <span>SYMBOL</span>
+      <span style="text-align:right">LTP</span>
+      <span style="text-align:right">CHG%</span>
+      <span style="text-align:right">BROKE AT</span>
+      <span style="text-align:right">PCR</span>
+    </div>
+    ${rows}
   </div>`;
 }
 
