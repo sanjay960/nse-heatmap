@@ -467,3 +467,105 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`NSE Heatmap server running → http://localhost:${PORT}`);
   backfillBreaks().then(() => startCandleScanner());
 });
+
+// ── OPTION CHAIN ──────────────────────────────────────────────────────────────
+// Fetches option chain and returns 5 ITM + ATM + 5 OTM strikes
+// with change in OI for both CE and PE
+
+app.get('/api/option-chain', async (req, res) => {
+  const symbol = (req.query.symbol || 'NIFTY').toUpperCase();
+  const isIndex = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'].includes(symbol);
+
+  try {
+    const url  = isIndex
+      ? `https://www.nseindia.com/api/option-chain-indices?symbol=${encodeURIComponent(symbol)}`
+      : `https://www.nseindia.com/api/option-chain-equities?symbol=${encodeURIComponent(symbol)}`;
+    const data = await nseGet(url);
+
+    const records  = data.records  || {};
+    const filtered = data.filtered || {};
+    const spot     = filtered.underlyingValue || records.underlyingValue || 0;
+    const expiries = records.expiryDates || [];
+    const expiry   = req.query.expiry || expiries[0]; // nearest by default
+
+    // Filter by selected expiry
+    const allStrikes = (records.data || []).filter(r => r.expiryDate === expiry);
+
+    // Get all strike prices sorted
+    const strikes = [...new Set(allStrikes.map(r => r.strikePrice))].sort((a,b) => a - b);
+
+    // Find ATM — closest strike to spot
+    const atm = strikes.reduce((prev, curr) =>
+      Math.abs(curr - spot) < Math.abs(prev - spot) ? curr : prev, strikes[0]
+    );
+    const atmIdx = strikes.indexOf(atm);
+
+    // 5 ITM + ATM + 5 OTM
+    const selectedStrikes = strikes.slice(
+      Math.max(0, atmIdx - 5),
+      Math.min(strikes.length, atmIdx + 6)
+    );
+
+    // Build strike rows
+    const rows = selectedStrikes.map(strike => {
+      const row    = allStrikes.find(r => r.strikePrice === strike) || {};
+      const ce     = row.CE || {};
+      const pe     = row.PE || {};
+      const isATM  = strike === atm;
+      const isITM_CE = strike < atm;
+      const isITM_PE = strike > atm;
+
+      return {
+        strike,
+        isATM,
+        label: isATM ? 'ATM' : strike < atm ? 'ITM' : 'OTM',
+        CE: {
+          oi        : ce.openInterest        || 0,
+          oiChange  : ce.changeinOpenInterest || 0,
+          oiChangePct: ce.pchangeinOpenInterest || 0,
+          ltp       : ce.lastPrice           || 0,
+          volume    : ce.totalTradedVolume   || 0,
+          iv        : ce.impliedVolatility   || 0,
+          bid       : ce.bidprice            || 0,
+          ask       : ce.askPrice            || 0,
+        },
+        PE: {
+          oi        : pe.openInterest        || 0,
+          oiChange  : pe.changeinOpenInterest || 0,
+          oiChangePct: pe.pchangeinOpenInterest || 0,
+          ltp       : pe.lastPrice           || 0,
+          volume    : pe.totalTradedVolume   || 0,
+          iv        : pe.impliedVolatility   || 0,
+          bid       : pe.bidprice            || 0,
+          ask       : pe.askPrice            || 0,
+        },
+      };
+    });
+
+    // PCR — Put/Call Ratio based on OI
+    const totalCEoi = rows.reduce((s,r) => s + r.CE.oi, 0);
+    const totalPEoi = rows.reduce((s,r) => s + r.PE.oi, 0);
+    const pcr       = totalCEoi > 0 ? +(totalPEoi / totalCEoi).toFixed(2) : 0;
+
+    // Max Pain — strike where total OI loss is minimum
+    let maxPainStrike = atm, minLoss = Infinity;
+    selectedStrikes.forEach(testStrike => {
+      const loss = rows.reduce((sum, r) => {
+        const ceLoss = r.CE.oi * Math.max(0, r.strike - testStrike);
+        const peLoss = r.PE.oi * Math.max(0, testStrike - r.strike);
+        return sum + ceLoss + peLoss;
+      }, 0);
+      if (loss < minLoss) { minLoss = loss; maxPainStrike = testStrike; }
+    });
+
+    res.json({ symbol, spot, expiry, expiries, atm, pcr, maxPain: maxPainStrike, rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// F&O stocks list for option view dropdown
+app.get('/api/fno-list', async (req, res) => {
+  try {
+    const syms = await getFNOSymbols();
+    res.json({ symbols: [...syms].sort() });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

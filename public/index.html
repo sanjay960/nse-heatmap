@@ -217,6 +217,63 @@
   .load-msg{padding:28px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:10px}
   .spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ── Option Chain ── */
+  .opt-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+  .opt-select{background:var(--bg);border:1px solid var(--border);color:var(--heading);font-family:var(--mono);font-size:12px;padding:8px 12px;border-radius:4px;cursor:pointer;outline:none}
+  .opt-select:focus{border-color:var(--acc)}
+  .opt-btn{background:var(--acc);border:none;color:#000;font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 18px;border-radius:4px;cursor:pointer;letter-spacing:1px;transition:all .2s}
+  .opt-btn:hover{background:#ffd060}
+  .opt-btn:disabled{background:var(--muted);cursor:not-allowed}
+
+  /* Summary bar */
+  .opt-summary{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px;padding:14px 18px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
+  .opt-kv{text-align:center}
+  .opt-kv-val{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--heading)}
+  .opt-kv-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:2px}
+
+  /* Expiry tabs */
+  .expiry-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+  .expiry-tab{font-family:var(--mono);font-size:10px;padding:5px 12px;border:1px solid var(--border);background:none;color:var(--muted);border-radius:4px;cursor:pointer;transition:all .15s}
+  .expiry-tab:hover{border-color:var(--text);color:var(--text)}
+  .expiry-tab.active{border-color:var(--acc);color:var(--acc);background:rgba(240,165,0,.08)}
+
+  /* Option chain table */
+  .oc-wrap{overflow-x:auto}
+  .oc-table{width:100%;border-collapse:collapse;min-width:900px}
+  .oc-table th{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}
+  .oc-table th.ce-hdr{color:var(--g3)}
+  .oc-table th.pe-hdr{color:var(--r3)}
+  .oc-table th.strike-hdr{text-align:center;color:var(--acc)}
+  .oc-table td{font-family:var(--mono);font-size:11px;padding:9px 10px;border-bottom:1px solid rgba(30,37,48,.5);text-align:right}
+  .oc-table tr:last-child td{border-bottom:none}
+  .oc-table tr:hover td{background:rgba(255,255,255,.02)}
+  .oc-table tr.atm-row td{background:rgba(240,165,0,.06)}
+  .oc-table tr.atm-row .strike-cell{background:rgba(240,165,0,.15)}
+
+  /* Strike cell */
+  .strike-cell{text-align:center;font-weight:700;color:var(--heading);position:relative}
+  .strike-badge{display:inline-block;font-size:8px;padding:1px 5px;border-radius:4px;margin-left:4px;vertical-align:middle}
+  .strike-badge.atm{background:rgba(240,165,0,.2);color:var(--acc)}
+  .strike-badge.itm-ce{background:rgba(0,192,118,.12);color:var(--g3)}
+  .strike-badge.itm-pe{background:rgba(217,48,48,.12);color:var(--r3)}
+
+  /* OI change bar */
+  .oi-cell{position:relative}
+  .oi-bar{position:absolute;top:0;bottom:0;border-radius:2px;opacity:.25;transition:width .5s}
+  .oi-bar.ce{background:var(--g3);right:0}
+  .oi-bar.pe{background:var(--r3);left:0}
+  .oi-val{position:relative;z-index:1}
+  .oi-chg-pos{color:var(--g3);font-weight:700}
+  .oi-chg-neg{color:var(--r3);font-weight:700}
+  .oi-chg-neu{color:var(--muted)}
+
+  /* PCR meter */
+  .pcr-bar-wrap{margin-top:12px;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
+  .pcr-bar-track{height:10px;background:rgba(255,255,255,.06);border-radius:5px;position:relative;overflow:hidden;margin:8px 0}
+  .pcr-bar-fill{height:100%;border-radius:5px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+  .pcr-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted)}
+
 </style>
 </head>
 <body>
@@ -395,10 +452,58 @@
      PAGE 3 — OPTION VIEW
 ════════════════════════════════════════ -->
 <div class="page" id="page-options">
-  <div class="coming-soon">
-    <div class="coming-soon-icon">🎯</div>
-    <div class="coming-soon-title">Option View</div>
-    <div class="coming-soon-sub">Coming soon — option chain, OI analysis, PCR</div>
+  <!-- Controls -->
+  <div class="card-section">
+    <div class="section-bar">
+      <div>
+        <div class="section-title">🎯 Option Chain — OI Analysis</div>
+        <div class="section-sub">5 ITM · ATM · 5 OTM · CHANGE IN OPEN INTEREST · CE &amp; PE</div>
+      </div>
+      <button class="section-toggle" onclick="toggleSection('oc-body',this)">▲ MINIMISE</button>
+    </div>
+    <div id="oc-body">
+      <div class="opt-controls">
+        <select class="opt-select" id="oc-symbol" onchange="onSymbolChange()">
+          <option value="NIFTY">NIFTY</option>
+          <option value="BANKNIFTY">BANKNIFTY</option>
+          <option value="FINNIFTY">FINNIFTY</option>
+          <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+          <optgroup label="─── F&O Stocks ───" id="fno-optgroup"></optgroup>
+        </select>
+        <select class="opt-select" id="oc-expiry"></select>
+        <button class="opt-btn" id="oc-load-btn" onclick="loadOptionChain()">▶ LOAD</button>
+        <button class="refresh-btn" onclick="loadOptionChain()" style="font-size:10px;padding:7px 12px">⟳</button>
+      </div>
+
+      <!-- Expiry quick tabs populated dynamically -->
+      <div class="expiry-tabs" id="expiry-tabs"></div>
+
+      <!-- Summary -->
+      <div class="opt-summary" id="oc-summary" style="display:none">
+        <div class="opt-kv"><div class="opt-kv-val" id="oc-spot">—</div><div class="opt-kv-lbl">SPOT</div></div>
+        <div class="opt-kv"><div class="opt-kv-val" id="oc-atm">—</div><div class="opt-kv-lbl">ATM STRIKE</div></div>
+        <div class="opt-kv"><div class="opt-kv-val" id="oc-pcr" style="color:var(--acc)">—</div><div class="opt-kv-lbl">PCR</div></div>
+        <div class="opt-kv"><div class="opt-kv-val" id="oc-maxpain">—</div><div class="opt-kv-lbl">MAX PAIN</div></div>
+        <div class="opt-kv"><div class="opt-kv-val" id="oc-expiry-disp">—</div><div class="opt-kv-lbl">EXPIRY</div></div>
+      </div>
+
+      <!-- PCR bar -->
+      <div class="pcr-bar-wrap" id="pcr-bar-wrap" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px">PUT/CALL RATIO</span>
+          <span style="font-family:var(--mono);font-size:11px" id="pcr-interp">—</span>
+        </div>
+        <div class="pcr-bar-track">
+          <div class="pcr-bar-fill" id="pcr-bar-fill" style="width:50%"></div>
+        </div>
+        <div class="pcr-labels"><span style="color:var(--r3)">BEARISH &lt;0.7</span><span>NEUTRAL 0.7–1.3</span><span style="color:var(--g3)">BULLISH &gt;1.3</span></div>
+      </div>
+
+      <!-- Option chain table -->
+      <div id="oc-result" style="margin-top:16px">
+        <div class="load-msg" style="padding:40px">Select a symbol and click LOAD</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -686,6 +791,162 @@ function renderSigList(stocks,mode){
     </div>`).join('')}
   </div>`;
 }
+
+
+// ── Option Chain ──────────────────────────────────────────────────────────────
+let ocExpiries = [], ocCurrentSymbol = 'NIFTY', ocCurrentExpiry = '';
+
+// Load F&O stocks into dropdown
+fetch('/api/fno-list').then(r=>r.json()).then(data=>{
+  const grp = document.getElementById('fno-optgroup');
+  if (!grp) return;
+  (data.symbols||[]).forEach(sym=>{
+    const o = document.createElement('option');
+    o.value = sym; o.textContent = sym;
+    grp.appendChild(o);
+  });
+}).catch(()=>{});
+
+function onSymbolChange(){
+  ocCurrentExpiry = '';
+  document.getElementById('expiry-tabs').innerHTML = '';
+  document.getElementById('oc-expiry').innerHTML   = '';
+  document.getElementById('oc-summary').style.display   = 'none';
+  document.getElementById('pcr-bar-wrap').style.display = 'none';
+  document.getElementById('oc-result').innerHTML = '<div class="load-msg" style="padding:40px">Click LOAD to fetch option chain</div>';
+}
+
+async function loadOptionChain() {
+  const sym    = document.getElementById('oc-symbol').value;
+  const expSel = document.getElementById('oc-expiry').value;
+  const expiry = expSel || ocCurrentExpiry || '';
+  const btn    = document.getElementById('oc-load-btn');
+  btn.disabled = true; btn.textContent = 'LOADING…';
+  document.getElementById('oc-result').innerHTML = '<div class="load-msg" style="padding:40px"><div class="spinner"></div> Fetching option chain…</div>';
+
+  try {
+    const url  = '/api/option-chain?symbol=' + encodeURIComponent(sym) + (expiry ? '&expiry=' + encodeURIComponent(expiry) : '');
+    const data = await fetch(url).then(r=>r.json());
+    if (data.error) throw new Error(data.error);
+
+    ocCurrentSymbol = sym;
+    ocCurrentExpiry = data.expiry;
+    ocExpiries      = data.expiries || [];
+
+    // Expiry quick tabs
+    const tabsEl = document.getElementById('expiry-tabs');
+    tabsEl.innerHTML = ocExpiries.slice(0, 8).map(e =>
+      `<button class="expiry-tab ${e===data.expiry?'active':''}" onclick="selectExpiry(this,'${e}')">${e}</button>`
+    ).join('');
+
+    // Expiry select sync
+    const expEl = document.getElementById('oc-expiry');
+    expEl.innerHTML = ocExpiries.map(e => `<option value="${e}" ${e===data.expiry?'selected':''}>${e}</option>`).join('');
+
+    // Summary
+    document.getElementById('oc-spot').textContent     = fmt(data.spot);
+    document.getElementById('oc-atm').textContent      = fmt(data.atm);
+    document.getElementById('oc-pcr').textContent      = data.pcr;
+    document.getElementById('oc-maxpain').textContent  = fmt(data.maxPain);
+    document.getElementById('oc-expiry-disp').textContent = data.expiry;
+    document.getElementById('oc-summary').style.display   = 'flex';
+
+    // PCR bar
+    const pcr    = data.pcr;
+    const pcrPct = Math.min(Math.max((pcr / 2) * 100, 0), 100);
+    const pcrCol = pcr > 1.3 ? 'var(--g3)' : pcr < 0.7 ? 'var(--r3)' : 'var(--acc)';
+    const pcrTxt = pcr > 1.3 ? '🟢 BULLISH — More PUT writing' : pcr < 0.7 ? '🔴 BEARISH — More CALL writing' : '⚪ NEUTRAL';
+    document.getElementById('pcr-bar-fill').style.width      = pcrPct + '%';
+    document.getElementById('pcr-bar-fill').style.background = pcrCol;
+    document.getElementById('pcr-interp').textContent        = pcrTxt;
+    document.getElementById('pcr-interp').style.color        = pcrCol;
+    document.getElementById('pcr-bar-wrap').style.display    = '';
+
+    // Find max OI change for bar scaling
+    const maxCEoiChg = Math.max(...data.rows.map(r => Math.abs(r.CE.oiChange)), 1);
+    const maxPEoiChg = Math.max(...data.rows.map(r => Math.abs(r.PE.oiChange)), 1);
+
+    // Build table
+    document.getElementById('oc-result').innerHTML = `
+      <div class="oc-wrap">
+        <table class="oc-table">
+          <thead>
+            <tr>
+              <th class="ce-hdr" colspan="5">CALL (CE)</th>
+              <th class="strike-hdr">STRIKE</th>
+              <th class="pe-hdr" colspan="5">PUT (PE)</th>
+            </tr>
+            <tr>
+              <th class="ce-hdr">OI CHG</th>
+              <th class="ce-hdr">OI</th>
+              <th class="ce-hdr">IV%</th>
+              <th class="ce-hdr">VOLUME</th>
+              <th class="ce-hdr">LTP</th>
+              <th class="strike-hdr">PRICE</th>
+              <th class="pe-hdr">LTP</th>
+              <th class="pe-hdr">VOLUME</th>
+              <th class="pe-hdr">IV%</th>
+              <th class="pe-hdr">OI</th>
+              <th class="pe-hdr">OI CHG</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.rows.map(r => {
+              const isATM    = r.isATM;
+              const label    = r.strike < data.atm ? 'ITM for CE' : r.strike > data.atm ? 'ITM for PE' : 'ATM';
+              const badgeCls = isATM ? 'atm' : r.strike < data.atm ? 'itm-ce' : 'itm-pe';
+              const ceBw     = (Math.abs(r.CE.oiChange) / maxCEoiChg * 80).toFixed(1);
+              const peBw     = (Math.abs(r.PE.oiChange) / maxPEoiChg * 80).toFixed(1);
+              const ceCls    = r.CE.oiChange > 0 ? 'oi-chg-pos' : r.CE.oiChange < 0 ? 'oi-chg-neg' : 'oi-chg-neu';
+              const peCls    = r.PE.oiChange > 0 ? 'oi-chg-pos' : r.PE.oiChange < 0 ? 'oi-chg-neg' : 'oi-chg-neu';
+              return `<tr class="${isATM?'atm-row':''}">
+                <td class="oi-cell" style="min-width:80px">
+                  <div class="oi-bar ce" style="width:${ceBw}%"></div>
+                  <span class="oi-val ${ceCls}">${r.CE.oiChange>=0?'+':''}${fmtV(r.CE.oiChange)}</span>
+                </td>
+                <td>${fmtV(r.CE.oi)}</td>
+                <td>${r.CE.iv?r.CE.iv.toFixed(1)+'%':'—'}</td>
+                <td>${fmtV(r.CE.volume)}</td>
+                <td style="color:var(--g3);font-weight:700">₹${fmt(r.CE.ltp)}</td>
+                <td class="strike-cell">
+                  ${fmt(r.strike)}
+                  <span class="strike-badge ${badgeCls}">${isATM?'ATM':r.strike<data.atm?'ITM':'OTM'}</span>
+                </td>
+                <td style="color:var(--r3);font-weight:700">₹${fmt(r.PE.ltp)}</td>
+                <td>${fmtV(r.PE.volume)}</td>
+                <td>${r.PE.iv?r.PE.iv.toFixed(1)+'%':'—'}</td>
+                <td>${fmtV(r.PE.oi)}</td>
+                <td class="oi-cell" style="min-width:80px">
+                  <div class="oi-bar pe" style="width:${peBw}%"></div>
+                  <span class="oi-val ${peCls}">${r.PE.oiChange>=0?'+':''}${fmtV(r.PE.oiChange)}</span>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+  } catch(err) {
+    document.getElementById('oc-result').innerHTML = '<div class="load-msg" style="color:var(--r2);padding:40px">⚠ ' + err.message + '</div>';
+  }
+  btn.disabled = false; btn.textContent = '▶ LOAD';
+}
+
+function selectExpiry(btn, expiry) {
+  document.querySelectorAll('.expiry-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('oc-expiry').value = expiry;
+  ocCurrentExpiry = expiry;
+  loadOptionChain();
+}
+
+// Auto-refresh option chain every 60s if on options tab
+setInterval(() => {
+  const optPage = document.getElementById('page-options');
+  if (optPage && optPage.classList.contains('active') && ocCurrentExpiry) {
+    loadOptionChain();
+  }
+}, 60000);
 
 // ── Auto-refresh & init ───────────────────────────────────────────────────────
 sel.addEventListener('change', ()=>loadHeatmap(sel.value));
